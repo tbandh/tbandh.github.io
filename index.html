@@ -99,6 +99,9 @@ select option{background:var(--color-surface-raised);color:var(--color-text)}
 .tag.mid{background:rgba(255,255,255,0.06);color:var(--color-text-secondary)}
 .tag.acc{background:var(--color-accent-bg);color:var(--color-accent)}
 .empty{padding:var(--space-8) 0;text-align:center;color:var(--color-text-secondary);font-size:var(--text-sm)}
+.tip{font-size:var(--text-xs);color:var(--color-text-secondary);line-height:var(--leading);
+  margin-bottom:var(--space-3);padding:var(--space-2) var(--space-3);
+  background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md)}
 .sug-wrap{position:relative}
 .sug{
   position:absolute;left:0;right:0;top:calc(100% + var(--space-1));z-index:30;display:none;
@@ -157,6 +160,7 @@ select option{background:var(--color-surface-raised);color:var(--color-text)}
       <input id="vkw" placeholder="搜版本号，例如 1.21 / 1.20.1">
       <div class="chips" id="vtypes"></div>
     </div>
+    <div class="tip">「版本包」= 游戏本体 jar + 同名版本清单 json。两个文件成对下载后，放进 .minecraft/versions/版本号/ 文件夹即可被启动器识别。</div>
     <div class="list" id="vlist"></div>
   </section>
 
@@ -244,10 +248,22 @@ function fsize(b){
 function esc(s){
   return (s==null?'':''+s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
-function dl(url,name){
-  const a=document.createElement('a');
-  a.href=url;a.target='_blank';a.rel='noopener';a.download=name||'';
-  document.body.appendChild(a);a.click();a.remove();
+async function dl(url,name){
+  const fn=name||'';
+  try{
+    const r=await fetch(url);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const b=await r.blob();
+    const u=URL.createObjectURL(b);
+    const a=document.createElement('a');
+    a.href=u;a.download=fn;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(u);},60000);
+  }catch(e){
+    const a=document.createElement('a');
+    a.href=url;a.download=fn;a.target='_blank';a.rel='noopener';
+    document.body.appendChild(a);a.click();a.remove();
+  }
 }
 
 async function boot(){
@@ -284,6 +300,7 @@ function renderVers(){
       '<div class="card-meta">'+esc(TC[v.type]||v.type)+' · '+esc((v.releaseTime||'').slice(0,10))+'</div></div>'+
       '<div class="chips">'+
         '<button class="btn btn-sm" data-k="client" data-u="'+esc(v.url)+'" data-i="'+esc(v.id)+'">客户端</button>'+
+        '<button class="btn btn-sm" data-k="pack" data-u="'+esc(v.url)+'" data-i="'+esc(v.id)+'">版本包</button>'+
         '<button class="btn btn-sm" data-k="server" data-u="'+esc(v.url)+'" data-i="'+esc(v.id)+'">服务端</button>'+
       '</div>'+
     '</div></div>').join('')+
@@ -294,6 +311,14 @@ async function grab(url,kind,id){
   setStatus('正在解析 '+id+' 的下载地址…');
   try{
     const d=await (await fetch(url)).json();
+    if(kind==='pack'){
+      const f=(d.downloads||{}).client;
+      if(!f){setStatus('该版本没有客户端文件','err');return;}
+      dl(f.url,id+'.jar');
+      setTimeout(function(){dl(url,id+'.json');},600);
+      setStatus('已开始下载版本包：'+id+'.jar + '+id+'.json。两个文件放进 .minecraft/versions/'+id+'/ 即可被启动器识别','ok');
+      return;
+    }
     const f=(d.downloads||{})[kind];
     if(!f){setStatus('该版本没有 '+kind+' 文件','err');return;}
     dl(f.url,id+'-'+kind+'.jar');
