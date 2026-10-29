@@ -163,7 +163,7 @@ select option{background:var(--color-surface-raised);color:var(--color-text)}
   <section class="panel" id="p2">
     <div class="bar">
       <div class="sug-wrap">
-        <input id="mkw" placeholder="搜模组名，支持中文，如 钠 / sodium" autocomplete="off">
+        <input id="mkw" placeholder="搜模组名或类别，支持中文，如 钠 / 优化" autocomplete="off">
         <div class="sug" id="msug"></div>
       </div>
       <div class="chips" id="mhot"></div>
@@ -316,7 +316,38 @@ const CN_NAME={
   "farmer's delight":'农夫乐事',"pam's harvestcraft":'潘马斯农场',
   'waystones':'指路石','patchouli':'帕秋莉手册','ender io':'末影接口',
   'thermal expansion':'热力膨胀','draconic evolution':'龙之进化',
-  'mystical agriculture':'神秘农业','cyclic':'循环'
+  'mystical agriculture':'神秘农业','cyclic':'循环',
+  'mouse tweaks':'鼠标手势',"xaero's minimap":'Xaero 的小地图',
+  "xaero's world map":'Xaero 的世界地图','ender storage':'末影存储',
+  'flux networks':'通量网络','the betweenlands':'交错次元',
+  'astral sorcery':'星辉魔法','slashblade':'拔刀剑'
+};
+
+// 中文类别/关键词 -> 英文搜索词（译名表没收录时用，支持大致搜索）
+const CN_KEY={
+  '优化':'optimization','性能':'optimization','流畅':'optimization','卡顿':'optimization',
+  '光影':'shader','着色器':'shader',
+  '背包':'backpack','地图':'minimap','小地图':'minimap',
+  '家具':'furniture','科技':'tech','工业':'tech',
+  '魔法':'magic','农业':'farming','种植':'farming','作物':'farming','农场':'farming',
+  '装饰':'decoration','生物':'mob','怪物':'mob','群系':'biome',
+  '存储':'storage','箱子':'storage','装备':'equipment','武器':'equipment',
+  '食物':'food','料理':'food','烹饪':'food',
+  '信息':'tooltip','提示':'tooltip','附魔':'enchant','传送':'teleport',
+  '自动化':'automation','合成':'recipe','配方':'recipe','建筑':'building',
+  '冒险':'adventure','界面':'ui','音效':'sound','声音':'sound',
+  '汉化':'chinese','中文':'chinese','前置':'library','结构':'structure',
+  '维度':'dimension','难度':'difficulty','天气':'weather','季节':'season'
+};
+
+// 中文俗称/别名 -> 搜索词（同一模组可有多个叫法，优先级高于类别词）
+const CN_ALIAS={
+  '鼠标':'mouse tweaks','鼠标手势':'mouse tweaks','鼠标整理':'mouse tweaks','鼠标增强':'mouse tweaks',
+  '小地图':"xaero's minimap",'xaero小地图':"xaero's minimap",'xaero的小地图':"xaero's minimap",'迷你地图':"xaero's minimap",
+  '世界地图':"xaero's world map",'xaero世界地图':"xaero's world map",
+  '合成表':'jei','配方查看':'jei','配方查询':'jei','物品管理':'jei',
+  '末影存储':'ender storage','通量网络':'flux networks','交错次元':'the betweenlands',
+  '星辉魔法':'astral sorcery','拔刀剑':'slashblade'
 };
 
 function hasCN(s){return /[\u4e00-\u9fff]/.test(s);}
@@ -324,9 +355,19 @@ function hasCN(s){return /[\u4e00-\u9fff]/.test(s);}
 function cnToEn(kw){
   const k=kw.trim().toLowerCase();
   for(const en in CN_NAME){if(CN_NAME[en].toLowerCase()===k)return en;}
+  for(const w in CN_ALIAS){if(w.toLowerCase()===k)return CN_ALIAS[w];}
+  for(const w in CN_KEY){if(w.toLowerCase()===k)return CN_KEY[w];}
   for(const en in CN_NAME){
     const cn=CN_NAME[en].toLowerCase();
     if(k.length>1&&(cn.indexOf(k)>=0||k.indexOf(cn)>=0))return en;
+  }
+  for(const w in CN_ALIAS){
+    const wl=w.toLowerCase();
+    if(k.length>1&&(k.indexOf(wl)>=0||wl.indexOf(k)>=0))return CN_ALIAS[w];
+  }
+  for(const w in CN_KEY){
+    const wl=w.toLowerCase();
+    if(k.length>1&&(k.indexOf(wl)>=0||wl.indexOf(k)>=0))return CN_KEY[w];
   }
   return null;
 }
@@ -388,8 +429,8 @@ async function searchMods(){
   let kw=raw,note='';
   if(raw&&hasCN(raw)){
     const en=cnToEn(raw);
-    if(en){kw=en;note=' · 中文名「'+raw+'」→ '+en;}
-    else{note=' · 该中文名未收录，按原文搜索';}
+    if(en){kw=en;note=' · 中文「'+raw+'」→ '+en;}
+    else{note=' · 未匹配到译名或类别词，按原文搜索';}
   }
   setStatus('正在搜索 Modrinth…'+note);
   $('#mlist').innerHTML='<div class="empty">加载中…</div>';
