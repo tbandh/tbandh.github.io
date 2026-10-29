@@ -99,6 +99,20 @@ select option{background:var(--color-surface-raised);color:var(--color-text)}
 .tag.mid{background:rgba(255,255,255,0.06);color:var(--color-text-secondary)}
 .tag.acc{background:var(--color-accent-bg);color:var(--color-accent)}
 .empty{padding:var(--space-8) 0;text-align:center;color:var(--color-text-secondary);font-size:var(--text-sm)}
+.sug-wrap{position:relative}
+.sug{
+  position:absolute;left:0;right:0;top:calc(100% + var(--space-1));z-index:30;display:none;
+  background:var(--color-surface-raised);border:1px solid var(--color-border);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow-md);overflow:hidden;
+}
+.sug.on{display:block}
+.sug-item{
+  display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);
+  padding:var(--space-2) var(--space-3);cursor:pointer;font-size:var(--text-sm);
+}
+.sug-item:hover,.sug-item.act{background:var(--color-primary-bg)}
+.sug-n{font-weight:500}
+.sug-d{font-size:var(--text-xs);color:var(--color-text-secondary);white-space:nowrap}
 .mask{
   position:fixed;inset:0;background:rgba(0,0,0,0.72);display:none;
   align-items:flex-end;justify-content:center;z-index:20;padding:var(--space-4);
@@ -111,6 +125,8 @@ select option{background:var(--color-surface-raised);color:var(--color-text)}
   box-shadow:var(--shadow-md);
 }
 .sheet-head{display:flex;justify-content:space-between;align-items:center;gap:var(--space-3);margin-bottom:var(--space-3)}
+.sheet-links{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3)}
+.sheet-links a{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
 .sheet-head h2{font-size:var(--text-xl);font-weight:600;word-break:break-all}
 .file{
   display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);
@@ -146,7 +162,11 @@ select option{background:var(--color-surface-raised);color:var(--color-text)}
 
   <section class="panel" id="p2">
     <div class="bar">
-      <input id="mkw" placeholder="搜模组名称，例如 sodium / jei">
+      <div class="sug-wrap">
+        <input id="mkw" placeholder="搜模组名，支持中文，如 钠 / sodium" autocomplete="off">
+        <div class="sug" id="msug"></div>
+      </div>
+      <div class="chips" id="mhot"></div>
       <div class="grid2">
         <select id="mloader">
           <option value="">全部加载器</option>
@@ -191,6 +211,7 @@ select option{background:var(--color-surface-raised);color:var(--color-text)}
       <h2 id="shTitle">文件列表</h2>
       <button class="btn btn-sm" id="shClose">关闭</button>
     </div>
+    <div class="sheet-links" id="shLinks"></div>
     <div id="shBody"></div>
   </div>
 </div>
@@ -282,29 +303,111 @@ async function grab(url,kind,id){
   }
 }
 
+const CN_NAME={
+  'sodium':'钠','lithium':'锂','starlight':'星光','phosphor':'磷',
+  'iris shaders':'Iris 光影','iris':'Iris 光影',
+  'create':'机械动力','jei':'物品管理器','just enough items':'物品管理器',
+  'appleskin':'苹果皮','jade':'玉','journeymap':'旅行地图','mod menu':'模组菜单',
+  'botania':'植物魔法','twilight forest':'暮色森林','immersive engineering':'沉浸工程',
+  'mekanism':'通用机械',"tinkers' construct":'匠魂','applied energistics 2':'应用能源2',
+  'refined storage':'精致存储','storage drawers':'存储抽屉','iron chests':'铁箱子',
+  'sophisticated backpacks':'精妙背包','quark':'夸克','the aether':'天境',
+  'ice and fire':'冰火传说','blood magic':'血魔法','ars nouveau':'新生魔艺',
+  "farmer's delight":'农夫乐事',"pam's harvestcraft":'潘马斯农场',
+  'waystones':'指路石','patchouli':'帕秋莉手册','ender io':'末影接口',
+  'thermal expansion':'热力膨胀','draconic evolution':'龙之进化',
+  'mystical agriculture':'神秘农业','cyclic':'循环'
+};
+
+function hasCN(s){return /[\u4e00-\u9fff]/.test(s);}
+
+function cnToEn(kw){
+  const k=kw.trim().toLowerCase();
+  for(const en in CN_NAME){if(CN_NAME[en].toLowerCase()===k)return en;}
+  for(const en in CN_NAME){
+    const cn=CN_NAME[en].toLowerCase();
+    if(k.length>1&&(cn.indexOf(k)>=0||k.indexOf(cn)>=0))return en;
+  }
+  return null;
+}
+
+function cnOf(h){
+  return CN_NAME[(h.title||'').toLowerCase()]||CN_NAME[(h.slug||'').toLowerCase()]||'';
+}
+
+function cnLabel(h){
+  const cn=cnOf(h);
+  return cn?(cn+'（'+h.title+'）'):h.title;
+}
+
+const HOT=['钠','机械动力','物品管理器','Iris 光影','锂','农夫乐事'];
+let sugTimer=null,sugSeq=0,sugItems=[],sugIdx=-1;
+
+function renderHot(){
+  $('#mhot').innerHTML=HOT.map(h=>
+    '<span class="chip" data-hot="'+esc(h)+'">'+esc(h)+'</span>').join('');
+}
+
+function hideSug(){
+  clearTimeout(sugTimer);sugTimer=null;
+  sugSeq++;
+  $('#msug').classList.remove('on');
+  sugIdx=-1;
+}
+
+function markSug(){
+  document.querySelectorAll('#msug .sug-item').forEach(function(n,i){
+    n.classList.toggle('act',i===sugIdx);
+  });
+}
+
+async function fetchSug(kw){
+  const seq=++sugSeq;
+  try{
+    const en=hasCN(kw)?cnToEn(kw):null;
+    const q=new URLSearchParams({query:en||kw,limit:'6',index:'downloads'});
+    const d=await (await fetch(MR+'/search?'+q)).json();
+    if(seq!==sugSeq)return;
+    const hits=d.hits||[];
+    if(!hits.length){hideSug();return;}
+    sugItems=hits;sugIdx=-1;
+    $('#msug').innerHTML=hits.map((h,i)=>
+      '<div class="sug-item" data-sug="'+i+'"><span class="sug-n">'+esc(cnLabel(h))+'</span>'+
+      '<span class="sug-d">'+esc(h.author)+' · '+fmt(h.downloads)+'</span></div>').join('');
+    $('#msug').classList.add('on');
+  }catch(e){if(seq===sugSeq)hideSug();}
+}
+
 async function searchMods(){
   const L=$('#mloader').value,G=$('#mgame').value.trim(),C=$('#mcat').value,S=$('#msort').value;
   const facets=[['project_type:mod']];
   if(L)facets.push(['categories:'+L]);
   if(G)facets.push(['versions:'+G]);
   if(C)facets.push(['categories:'+C]);
-  setStatus('正在搜索 Modrinth…');
+  const raw=$('#mkw').value.trim();
+  let kw=raw,note='';
+  if(raw&&hasCN(raw)){
+    const en=cnToEn(raw);
+    if(en){kw=en;note=' · 中文名「'+raw+'」→ '+en;}
+    else{note=' · 该中文名未收录，按原文搜索';}
+  }
+  setStatus('正在搜索 Modrinth…'+note);
   $('#mlist').innerHTML='<div class="empty">加载中…</div>';
   try{
     const q=new URLSearchParams({
-      query:$('#mkw').value.trim(),facets:JSON.stringify(facets),index:S,limit:'20'
+      query:kw,facets:JSON.stringify(facets),index:S,limit:'20'
     });
     const d=await (await fetch(MR+'/search?'+q)).json();
     const hits=d.hits||[];
-    setStatus('Modrinth 找到约 '+(d.total_hits||0)+' 个结果','ok');
+    setStatus('Modrinth 找到约 '+(d.total_hits||0)+' 个结果'+note,'ok');
     if(!hits.length){$('#mlist').innerHTML='<div class="empty">没有匹配的模组</div>';return;}
     $('#mlist').innerHTML=hits.map(h=>{
       const tags=(h.categories||[]).slice(0,5).map(c=>
         '<span class="tag mid">'+esc(c)+'</span>').join(' ');
       return '<div class="card"><div class="card-head">'+
-        '<div><div class="card-title">'+esc(h.title)+'</div>'+
+        '<div><div class="card-title">'+esc(cnLabel(h))+'</div>'+
         '<div class="card-meta">'+esc(h.author)+' · 下载 '+fmt(h.downloads)+' · 关注 '+fmt(h.follows)+'</div></div>'+
-        '<button class="btn btn-sm" data-mod="'+esc(h.slug)+'">查看文件</button></div>'+
+        '<button class="btn btn-sm" data-mod="'+esc(h.slug)+'" data-mn="'+esc(cnOf(h)||h.title)+'">查看文件</button></div>'+
         '<div class="card-meta" style="margin-top:var(--space-2)">'+esc(h.description)+'</div>'+
         '<div class="chips" style="margin-top:var(--space-3)">'+tags+'</div></div>';
     }).join('');
@@ -314,10 +417,14 @@ async function searchMods(){
   }
 }
 
-async function openMod(slug){
+async function openMod(slug,name){
   const L=$('#mloader').value,G=$('#mgame').value.trim();
+  const kw=name||slug;
   $('#mask').classList.add('on');
-  $('#shTitle').textContent=slug;
+  $('#shTitle').textContent=kw;
+  $('#shLinks').innerHTML=
+    '<a class="btn btn-sm" href="https://modrinth.com/mod/'+encodeURIComponent(slug)+'" target="_blank" rel="noopener">官网（Modrinth）</a>'+
+    '<a class="btn btn-sm" href="https://search.mcmod.cn/s?key='+encodeURIComponent(kw)+'" target="_blank" rel="noopener">MC 百科搜索</a>';
   $('#shBody').innerHTML='<div class="empty">加载中…</div>';
   try{
     const q={};
@@ -342,14 +449,21 @@ async function openMod(slug){
 }
 
 document.addEventListener('click',function(e){
-  const t=e.target.closest('[data-t],[data-q],[data-k],[data-mod],[data-f]');
+  const t=e.target.closest('[data-t],[data-q],[data-k],[data-mod],[data-f],[data-sug],[data-hot]');
   if(!t)return;
   const d=t.dataset;
   if(d.t!==undefined){TYPE=d.t;renderTypes();renderVers();}
   else if(d.q!==undefined){KW=d.q;$('#vkw').value=d.q;renderVers();}
   else if(d.k){grab(d.u,d.k,d.i);}
-  else if(d.mod){openMod(d.mod);}
+  else if(d.mod){openMod(d.mod,d.mn);}
   else if(d.f){dl(d.f,d.fn);setStatus('已开始下载 '+d.fn,'ok');}
+  else if(d.sug!==undefined){
+    const s=sugItems[+d.sug];
+    if(s){$('#mkw').value=s.title;hideSug();searchMods();}
+  }
+  else if(d.hot!==undefined){
+    $('#mkw').value=d.hot;hideSug();searchMods();
+  }
 });
 
 document.querySelectorAll('.tab').forEach(function(b){
@@ -363,7 +477,32 @@ document.querySelectorAll('.tab').forEach(function(b){
 
 $('#vkw').addEventListener('input',function(e){KW=e.target.value.trim();renderVers();});
 $('#mgo').addEventListener('click',searchMods);
-$('#mkw').addEventListener('keydown',function(e){if(e.key==='Enter')searchMods();});
+$('#mkw').addEventListener('input',function(e){
+  const kw=e.target.value.trim();
+  clearTimeout(sugTimer);sugTimer=null;
+  sugSeq++;
+  if(!kw){hideSug();return;}
+  sugTimer=setTimeout(function(){fetchSug(kw);},350);
+});
+$('#mkw').addEventListener('keydown',function(e){
+  const on=$('#msug').classList.contains('on');
+  if(e.key==='Enter'){
+    e.preventDefault();
+    if(on&&sugIdx>=0&&sugItems[sugIdx])$('#mkw').value=sugItems[sugIdx].title;
+    hideSug();
+    searchMods();
+  }else if(e.key==='ArrowDown'&&on){
+    e.preventDefault();sugIdx=Math.min(sugIdx+1,sugItems.length-1);markSug();
+  }else if(e.key==='ArrowUp'&&on){
+    e.preventDefault();sugIdx=Math.max(sugIdx-1,-1);markSug();
+  }else if(e.key==='Escape'){
+    hideSug();
+  }
+});
+document.addEventListener('click',function(e){
+  if(!e.target.closest('.sug-wrap'))hideSug();
+});
+renderHot();
 $('#shClose').addEventListener('click',function(){$('#mask').classList.remove('on');});
 $('#mask').addEventListener('click',function(e){if(e.target.id==='mask')$('#mask').classList.remove('on');});
 
